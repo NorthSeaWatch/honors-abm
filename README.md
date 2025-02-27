@@ -19,7 +19,6 @@ honors-abm/
 ├── .gitignore             # Files and directories to ignore in version control
 ├── README.md              # Project overview and documentation
 ├── requirements.txt       # Project dependencies
-├── venv/                  # Virtual environment (not tracked by Git)
 ├── src/                   # Code related to the simulation
 │   ├── agents/            # Ship and agent logic
 │   │   └── ship.py        # Ship class
