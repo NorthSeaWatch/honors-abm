@@ -31,3 +31,8 @@ honors-abm/
 └── tests/                 # Unit tests for agents, models, etc.
     └── test_agents.py     # Tests for ship agent behavior
 ```
+
+To run the unit tests:
+```
+ python -m unittest discover tests/
+```
