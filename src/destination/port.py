@@ -51,6 +51,7 @@ class Port:
             self.max_capacity = 30
         elif self.max_capacity == 'L':
             self.max_capacity = 60
+        return self.max_capacity
     
     # will need to modify this function to work with either Ship.move or find another logic
     # to calculate how current capacity is calculated
@@ -58,4 +59,4 @@ class Port:
         pass
 
     def __repr__(self):
-        return f'Port (id: {self.port_id},name: {self.port_id},max capacity: {self.max_capacity}, current_capacity: {self.current_capacity})'
+        return f'Port (id: {self.port_id},name: {self.port_name},max capacity: {self.max_capacity_filter()}, current_capacity: {self.current_capacity})'
