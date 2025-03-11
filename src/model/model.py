@@ -2,8 +2,6 @@ import random
 import math
 import uuid
 import matplotlib.pyplot as plt
-import matplotlib.image as mpimg
-from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 from agents.ship import Ship
 from agents.port import Port
 import os
@@ -12,9 +10,6 @@ import csv
 #load port data
 port_data_path = os.path.abspath('data/filtered_port.csv')
 
-#load port image
-port_path = os.path.abspath('static/port_image.png')
-port_img = mpimg.imread(port_path)
 
 class Model:
     """
@@ -76,7 +71,7 @@ class Model:
             
             # Determine the range 
             # The larger these factors, the more spread out the ports will be
-            spread_factor = 1
+            spread_factor = 0.8
             lat_range = (max_lat - min_lat) * spread_factor
             lon_range = (max_lon - min_lon) * spread_factor
             
@@ -92,7 +87,7 @@ class Model:
                 
                 port = Port(
                     port_id=port_data["id"],
-                    port_name=port_data["name"],
+                    port_name=port_data["name"][:3],
                     max_capacity=port_data["capacity"],
                     current_capacity=0,
                     pos_x=normalized_x,
@@ -200,16 +195,17 @@ class Model:
     def draw(self):
         self.ax1.axis([0, 1, 0, 1])
 
-        # Draw ports
+        # Draw ports as black squares
         for port in self.ports:
-            imagebox = OffsetImage(port_img, zoom=0.007) 
-            ab = AnnotationBbox(imagebox, (port.pos_x, port.pos_y), frameon=False)
-            self.ax1.add_artist(ab)
-                
-            # Add port name and capacity text
-            self.ax1.text(port.pos_x, port.pos_y - 0.02,
-                        f"{port.port_name} ({port.current_capacity}/{port.max_capacity_filter()})",
-                        fontsize=7, ha='center', va='top')
+            # Draw the port
+            self.ax1.scatter( port.pos_x, port.pos_y, color='black', marker='s',s=25)
+            
+            # Add port name and capacity text below the square
+            self.ax1.text(port.pos_x, port.pos_y - 0.02,f"{port.port_name} ({port.current_capacity}/{port.max_capacity_filter()})",
+                fontsize=6, 
+                ha='center',
+                va='top'
+            )
             
         # Plot the trails for scrubber ships
         if self.trails:

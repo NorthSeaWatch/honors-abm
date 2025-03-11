@@ -45,9 +45,9 @@ class Port:
         L(large size ports) to 60.
         """
         if self.max_capacity == 'M':
-            return 30
+            return 5
         elif self.max_capacity == 'L':
-            return 60
+            return 10
         return self.max_capacity
     
     def has_capacity(self):
