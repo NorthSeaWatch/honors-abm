@@ -70,8 +70,9 @@ class Model:
             center_lon = (min_lon + max_lon) / 2
             
             # Determine the range 
-            # The larger these factors, the more spread out the ports will be
-            spread_factor = 0.8
+            # The larger these f
+            # actors, the more spread out the ports will be
+            spread_factor = 0.92
             lat_range = (max_lat - min_lat) * spread_factor
             lon_range = (max_lon - min_lon) * spread_factor
             
@@ -201,8 +202,8 @@ class Model:
             self.ax1.scatter( port.pos_x, port.pos_y, color='black', marker='s',s=25)
             
             # Add port name and capacity text below the square
-            self.ax1.text(port.pos_x, port.pos_y - 0.02,f"{port.port_name} ({port.current_capacity}/{port.max_capacity_filter()})",
-                fontsize=6, 
+            self.ax1.text(port.pos_x, port.pos_y - 0.02,f"{port.port_name} ({port.current_capacity}:{port.max_capacity_filter()})",
+                fontsize=4, 
                 ha='center',
                 va='top'
             )
