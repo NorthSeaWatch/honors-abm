@@ -40,6 +40,7 @@ class Port(Agent):
         self.port_capacity = self.port_size(port_data["capacity"])
         self.current_capacity = 0
         self.docked_ships = []
+        self.allow_scrubber = (self.model.random.random() < self.model.prob_allow_scrubbers)
     
 
     def port_size(self, capacity):
@@ -58,6 +59,8 @@ class Port(Agent):
         Attempt to dock a ship at this port.
         Returns True if docking was successful, False otherwise.
         """
+        if ship.is_scrubber and not self.allow_scrubber:
+            return False
         if self.current_capacity < self.port_capacity:
             self.current_capacity += 1
             self.docked_ships.append(ship)
@@ -91,54 +94,126 @@ class Ship(Agent):
         #ship is not docked in the first step
         self.docked = False
         #steps that ship was docked
-        self.docking_steps = 0
+        self.docking_steps = 0  
+        
+        self.route = []
+        self.current_target_index = 0
+        
+        # Mark as scrubber ship with 30% probability.
+        self.is_scrubber = (self.model.random.random() < 0.3)
+        
+        # Count the steps the ship is waiting to dock.
+        self.wait_time = 0
+        
+    def sign(self, x):
+        if x > 0:
+            return 1
+        elif x < 0:
+            return -1
+        else:
+            return 0
     
 
     def step(self):
         """
         Ship movement method. 
         """
+        # If already removed from the schedule, stop processing.
+        if self not in self.model.schedule.agents:
+            return
         if not self.docked:
-            # movement is random in any direction in neighborhood cells
-            possible_steps = self.model.grid.get_neighborhood(
-                self.pos, moore=True, include_center=True
-            )
-            
-            #checking for possible cells to step into (only water is allowed)
-            valid_steps = []
-            for pos in possible_steps:
-                cell_contents = self.model.grid.get_cell_list_contents(pos)
+            old_pos = self.pos  # save current position before moving
+            if self.route and self.current_target_index < len(self.route):
+                target_port = self.route[self.current_target_index]
+                target_pos = target_port.pos # port's grid position
+                current_pos = self.pos
+                
+                # Calculate a one-step move in the direction of the target port using a simple sign function.
+                dx = self.sign(target_pos[0] - current_pos[0])
+                dy = self.sign(target_pos[1] - current_pos[1])
+                new_position = (current_pos[0] + dx, current_pos[1] + dy)
+                
+                # First check if the chosen cell is water
+                cell_contents = self.model.grid.get_cell_list_contents(new_position)
                 if any(isinstance(agent, Terrain) and agent.terrain_type == 'water' for agent in cell_contents):
-                    valid_steps.append(pos)
-            
-            # choosing a random water cells if there is one in the valid_steps
-            if valid_steps:
-                new_position = self.random.choice(valid_steps)
-                self.model.grid.move_agent(self, new_position)
-            
-            # checking if the ship is next to the port (moore=True allows ships to check 8 cells around them, 
-            # when False is used it only checks the 4 cells around it)
-            neighbors = self.model.grid.get_neighbors(self.pos, moore=True, include_center=False)
-            for neighbor in neighbors:
-                if isinstance(neighbor, Port):
-                    # docking to the port if it is next to it
-                    if neighbor.dock_ship(self):
+                    self.model.grid.move_agent(self, new_position)
+                else:
+                    # Fallback: choose a random water cell from the neighborhood if the ideal move isn't valid.
+                    possible_steps = self.model.grid.get_neighborhood(self.pos, moore=True, include_center=True)
+                    valid_steps = []
+                    for pos in possible_steps:
+                        cell_contents = self.model.grid.get_cell_list_contents(pos)
+                        if any(isinstance(agent, Terrain) and agent.terrain_type == 'water' for agent in cell_contents):
+                            valid_steps.append(pos)
+                    if valid_steps:
+                        new_position = self.random.choice(valid_steps)
+                        self.model.grid.move_agent(self, new_position)
+                
+                # If the ship is in or next to the target port's cell, attempt docking.
+                if self.pos == target_pos or target_pos in self.model.grid.get_neighborhood(self.pos, moore=True, include_center=True):
+                    if target_port.dock_ship(self):
                         self.docked = True
-                        #changing docking counter to 0
                         self.docking_steps = 0
-                        print(f'Ship {self.unique_id} docked at {neighbor.name}')
-                        break
+                        self.wait_time = 0  # reset when docked
+                        print(f'Ship {self.unique_id} docked at {target_port.name}')
+                    # if docking fails (for example due to capacity), keep moving toward the target.
+            else:
+                # default random movement (water cells only) if no valid route is set
+                possible_steps = self.model.grid.get_neighborhood(self.pos, moore=True, include_center=True)
+                valid_steps = []
+                for pos in possible_steps:
+                    cell_contents = self.model.grid.get_cell_list_contents(pos)
+                    if any(isinstance(agent, Terrain) and agent.terrain_type == 'water' for agent in cell_contents):
+                        valid_steps.append(pos)
+                if valid_steps:
+                    new_position = self.random.choice(valid_steps)
+                    self.model.grid.move_agent(self, new_position)
+                    
+            # If the ship moved and is a scrubber ship, leave a trail
+            if self.is_scrubber and self.pos != old_pos:
+                new_trail = ScrubberTrail(self.model.next_trail_id, self.model)
+                self.model.next_trail_id += 1
+                self.model.grid.place_agent(new_trail, old_pos)
+                self.model.schedule.add(new_trail)
+            
+            # Increase wait time when not docked.
+            self.wait_time += 1
+            if self.wait_time >= self.model.ship_wait_time:
+                print(f"Ship {self.unique_id} removed due to timeout waiting to dock.")
+                self.model.grid.remove_agent(self)
+                self.model.schedule.remove(self)
+                return
         else:
-            # if the ship is docked we start the counter
+            # If the ship is docked, increment the docking counter.
             self.docking_steps += 1      
-            # ship is unlocked after certain amount of steps (10 in this case) 
+            # After 10 steps, undock and, if a route is defined, move to the next target port.
             if self.docking_steps >= 10:
                 for agent in self.model.schedule.agents:
                     if isinstance(agent, Port) and self in agent.docked_ships:
                         agent.undock_ship(self)
                         print(f'Ship {self.unique_id} undocked from {agent.name}')
+                        self.docked = False
+                        # Advance to the next target port in the route.
+                        self.current_target_index += 1
                         break
-
+                    
+class ScrubberTrail(Agent):
+    """
+    Agent representing a discharge trail from a scrubber ship.
+    Carries 10 units of scrubber water and fades after a few steps.
+    """
+    def __init__(self, unique_id, model, lifespan=35):
+        super().__init__(unique_id, model)
+        self.water_units = 10
+        self.lifespan = lifespan
+    
+    def step(self):
+        self.lifespan -= 1
+        if self.lifespan <= 0:
+            self.model.grid.remove_agent(self)
+            self.model.schedule.remove(self)
+            
+                
 class Terrain(Agent):
     """"
     A terrain agent in the North Sea simulation - static.
@@ -152,7 +227,7 @@ class ShipPortModel(Model):
     """"
     Simulation class that runs the model logic.
     """
-    def __init__(self, width, height, num_ships):
+    def __init__(self, width, height, num_ships, ship_wait_time=20, prob_allow_scrubbers=0.5):
         # torus False means ships cannot travel to the other side of the grid
         self.grid = MultiGrid(width, height, torus=False)
         self.schedule = RandomActivation(self)
@@ -160,6 +235,13 @@ class ShipPortModel(Model):
         # initial numbers for docked and undocked
         self.docked_ships_count = 0
         self.undocked_ships_count = 0
+        
+        self.next_trail_id = 10000
+        
+        # Extra environment settings
+        self.ship_wait_time = ship_wait_time
+        self.prob_allow_scrubbers = prob_allow_scrubbers
+
 
         #!DO NOT TRY TO CHANGE THIS WITHOUT ANDREY'S CONSENT CAUSE HE LOST HIS ABILITY TO SEE TRYING TO SET IT UP!
         land_regions = [
@@ -234,7 +316,7 @@ class ShipPortModel(Model):
             self.schedule.add(port) 
         num_ports = len(Port.raw_port_data)
         
-        # randomly placing ships
+        # placing ships
         for i in range(num_ports, num_ships):
             ship = Ship(i, self)
             # checking for water cells to place ships
@@ -248,13 +330,31 @@ class ShipPortModel(Model):
                 x, y = self.random.choice(water_cells)
                 self.grid.place_agent(ship, (x, y))
                 self.schedule.add(ship)
+            ports = [agent for agent in self.schedule.agents if isinstance(agent, Port)]
+            if len(ports) >= 3:
+                ship.route = self.random.sample(ports, 3)
+                
+        # Data collector to track scrubber ships and trail data.
+        self.datacollector = DataCollector(
+            model_reporters = {
+                "NumScrubberShips": lambda m: sum(1 for a in m.schedule.agents if isinstance(a, Ship) and getattr(a, 'is_scrubber', False)),
+                "NumScrubberTrails": lambda m: sum(1 for a in m.schedule.agents if type(a) is ScrubberTrail),
+                "TotalScrubberWater": lambda m: sum(a.water_units for a in m.schedule.agents if type(a) is ScrubberTrail),
+                "NumShips": lambda m: sum(1 for a in m.schedule.agents if isinstance(a, Ship)),
+                "TotalDockedShips": lambda m: sum(len(a.docked_ships) for a in m.schedule.agents if isinstance(a, Port)),
+                "AvgPortPopularity": lambda m: (sum(len(a.docked_ships) for a in m.schedule.agents if isinstance(a, Port)) 
+                                                / max(1, sum(1 for a in m.schedule.agents if isinstance(a, Port)))),
+                "NumPortsBan": lambda m: sum(1 for a in m.schedule.agents if isinstance(a, Port) and not a.allow_scrubber)
+            }
+        )
     
     def step(self):
         """
         Step method
         """
         self.schedule.step()
-    
+        self.datacollector.collect(self)
+
     def lat_lon_to_grid(self, lat, lon):
         """
         Convert lat/lon to grid coordinates
@@ -265,13 +365,11 @@ class ShipPortModel(Model):
 
 def agent_portrayal(agent):
     if isinstance(agent, Port):
-        if agent.port_capacity == 5:
-            grid_port_size = 2
-        else:
-            grid_port_size = 3
+        color = "brown" if agent.allow_scrubber else "black"
+        grid_port_size = 2 if agent.port_capacity == 5 else 3
         return {
             "Shape": "rect", 
-            "Color": "black", 
+            "Color": color, 
             "Filled": "true", 
             "Layer":1,
             "w": grid_port_size, 
@@ -282,13 +380,23 @@ def agent_portrayal(agent):
             "current_capacity": agent.current_capacity 
         }
     elif isinstance(agent, Ship):
-        color = "blue" if agent.docked else "red"
+        color = "blue" if agent.docked else "green"
+        if agent.is_scrubber:
+            color = "red"
         return {
             "Shape": "circle", 
             "Color": color, 
             "Filled": "true", 
             "Layer": 1,
             "r": 1
+        }
+    elif isinstance(agent, ScrubberTrail):
+        return {
+            "Shape": "circle", 
+            "Color": "orange", 
+            "Filled": "true", 
+            "Layer": 0,
+            "r": 0.5
         }
     elif isinstance(agent, Terrain):
         if agent.terrain_type == 'water':
@@ -310,14 +418,22 @@ def agent_portrayal(agent):
                 "h": 1
             }
 
-# grid set up
-grid = CanvasGrid(agent_portrayal, 100, 100, 500, 500)
+if __name__ == "__main__":
+    # grid set up
+    grid = CanvasGrid(agent_portrayal, 100, 100, 500, 500)
 
-server = ModularServer(
-    ShipPortModel, 
-    [grid], 
-    'North Sea Watch',
-    {'width': 100, 'height': 100, 'num_ships': 120}
-)
+    server = ModularServer(
+        ShipPortModel, 
+        [grid], 
+        'North Sea Watch',
+        {
+            'width': 100, 
+            'height': 100, 
+            'num_ships': 120,
+            'ship_wait_time': 100,
+            'prob_allow_scrubbers': 0.5       # chance a port allows scrubber ships
 
-server.launch()
+        }
+    )
+    server.port = 8521  # example port
+    server.launch()
