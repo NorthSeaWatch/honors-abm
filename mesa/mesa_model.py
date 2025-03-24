@@ -247,6 +247,7 @@ class ShipPortModel(Model):
     Simulation class that runs the model logic.
     """
     def __init__(self, width, height, num_ships, ship_wait_time=20, prob_allow_scrubbers=0.5):
+        self.num_ships = num_ships
         # torus False means ships cannot travel to the other side of the grid
         self.grid = MultiGrid(width, height, torus=False)
         self.schedule = RandomActivation(self)

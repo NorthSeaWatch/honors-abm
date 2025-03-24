@@ -4,6 +4,7 @@ import pandas as pd
 from datetime import datetime
 from google.cloud.sql.connector import Connector
 from sqlalchemy import create_engine, text
+from sqlalchemy.types import JSON as SQLJSON
 from mesa_model import ShipPortModel, Ship, Port, ScrubberTrail, Terrain
 
 
@@ -12,7 +13,7 @@ from mesa_model import ShipPortModel, Ship, Port, ScrubberTrail, Terrain
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "north-sea-watch-39a510f80808.json"
 
 # DB connection constants
-DB_NAME = os.getenv("DB_NAME", "ais_data_collection")
+DB_NAME = os.getenv("DB_NAME", "abm")
 DB_USER = os.getenv("DB_USER", "aoyamaxx")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "aoyamaxx")
 INSTANCE_CONNECTION_NAME = "north-sea-watch:europe-west4:ais-database"
@@ -92,7 +93,7 @@ def create_tables():
             conn.execute(text(ddl))
     print("Tables created or verified.")
 
-def log_simulation_state(model, experiment_id, step):
+def collect_simulation_state(model, experiment_id, step):
     ship_data = []
     port_data = []
     cell_data = []
@@ -107,7 +108,7 @@ def log_simulation_state(model, experiment_id, step):
                 "ship_unique_id": agent.unique_id,
                 "ship_type": agent.ship_type,
                 "is_scrubber": agent.is_scrubber,
-                "route": json.dumps(route),
+                "route": route,
                 "x": agent.pos[0],
                 "y": agent.pos[1],
                 "docking_steps": agent.docking_steps,
@@ -128,33 +129,23 @@ def log_simulation_state(model, experiment_id, step):
                 "x": agent.pos[0],
                 "y": agent.pos[1]
             })
-    # For water cells, iterate through grid cells.
-    for (x, y) in model.grid.coord_iter():
-        cell_contents = model.grid.get_cell_list_contents((x, y))
-        # Mark if a ship or scrubber trail occupies the cell.
-        occupied_by_ship = any(isinstance(a, Ship) for a in cell_contents)
-        occupied_by_trail = any(isinstance(a, ScrubberTrail) for a in cell_contents)
-        cell_data.append({
-            "experiment_id": experiment_id,
-            "step": step,
-            "x": x,
-            "y": y,
-            "occupied_by_ship": occupied_by_ship,
-            "occupied_by_trail": occupied_by_trail,
-        })
-    # Convert lists to DataFrame and then push to database.
-    ships_df = pd.DataFrame(ship_data)
-    ports_df = pd.DataFrame(port_data)
-    cells_df = pd.DataFrame(cell_data)
-    
-    with engine.begin() as conn:
-        if not ships_df.empty:
-            ships_df.to_sql("abm_ships", conn, if_exists="append", index=False)
-        if not ports_df.empty:
-            ports_df.to_sql("abm_ports", conn, if_exists="append", index=False)
-        if not cells_df.empty:
-            cells_df.to_sql("abm_cells", conn, if_exists="append", index=False)
-    print(f"Step {step} logged.")
+     # collect cell data only every 10 steps.
+    if step % 10 == 0:
+        for cell_contents, x, y in model.grid.coord_iter():
+            occupied_by_ship = any(isinstance(a, Ship) for a in cell_contents)
+            occupied_by_trail = any(isinstance(a, ScrubberTrail) for a in cell_contents)
+            if occupied_by_ship or occupied_by_trail:
+                cell_data.append({
+                    "experiment_id": experiment_id,
+                    "step": step,
+                    "x": x,
+                    "y": y,
+                    "occupied_by_ship": occupied_by_ship,
+                    "occupied_by_trail": occupied_by_trail,
+                })
+                
+    return ship_data, port_data, cell_data
+
 
 def run_experiment(num_steps=50, width=100, height=100, num_ships=120, ship_wait_time=100, prob_allow_scrubbers=0.5):
     # Insert a new experiment record and get the generated experiment_id.
@@ -173,13 +164,32 @@ def run_experiment(num_steps=50, width=100, height=100, num_ships=120, ship_wait
         experiment_id = result.scalar()
     print(f"Experiment {experiment_id} started at {datetime.now()}")
     
-    # Initialize the Mesa model.
+    # Initialize empty lists to accumulate data.
+    all_ship_data = []
+    all_port_data = []
+    all_cell_data = []
+    
     model = ShipPortModel(width, height, num_ships, ship_wait_time, prob_allow_scrubbers)
-    # Run the model for a given number of steps.
     for step in range(num_steps):
         model.step()
-        log_simulation_state(model, experiment_id, step)
+        ship_data, port_data, cell_data = collect_simulation_state(model, experiment_id, step)
+        all_ship_data.extend(ship_data)
+        all_port_data.extend(port_data)
+        all_cell_data.extend(cell_data)
+        print(f"Step {step} processed.")
     
+    # After simulation, perform bulk insert.
+    ships_df = pd.DataFrame(all_ship_data)
+    ports_df = pd.DataFrame(all_port_data)
+    cells_df = pd.DataFrame(all_cell_data)
+    
+    with engine.begin() as conn:
+        if not ships_df.empty:
+            ships_df.to_sql("abm_ships", conn, if_exists="append", index=False, dtype={"route": SQLJSON()})
+        if not ports_df.empty:
+            ports_df.to_sql("abm_ports", conn, if_exists="append", index=False)
+        if not cells_df.empty:
+            cells_df.to_sql("abm_cells", conn, if_exists="append", index=False)
     print("Experiment complete.")
 
 if __name__ == "__main__":

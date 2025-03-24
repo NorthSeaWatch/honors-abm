@@ -59,3 +59,35 @@ python mesa_model.py
 ```
 
 This command starts the **ModularServer** with a CanvasGrid visualization, allowing you to observe ship movements, docking events, and environmental effects in real-time.
+
+
+## Data Logging and Export (abm_export.py)
+
+This script is designed to collect and export simulation data from the Mesa model into a relational database using a bulk insert strategy. Here’s a breakdown of what each part does:
+
+- **Database Connection and Table Creation:**  
+  The script uses the Google Cloud SQL Connector and SQLAlchemy to connect to a PostgreSQL database. The `create_tables()` function verifies (or creates if needed) four tables:
+  - `experiments` – stores metadata for each experiment run (with parameters and run date).
+  - `abm_ships` – holds per-step information for each Ship agent (such as ID, ship type, scrubber status, route as JSON, position, docking details, etc.).
+  - `abm_ports` – records per-step state for each Port agent (including its ID, name, geographic coordinates, capacity, and current status).
+  - `abm_cells` – logs grid cell activity (only for cells with a Ship or a ScrubberTrail) including their coordinates and occupancy status.
+
+- **Data Collection (Function: collect_simulation_state):**  
+  This function is called every simulation step. It iterates over the model’s agents to gather:
+  - **Ship Data:** For every Ship, the function collects its unique ID, type, scrubber flag, assigned route (as a list of port IDs), grid coordinates, and docking/wait information.
+  - **Port Data:** For every Port, it records the port’s unique ID, name, location (latitude and longitude), capacity details, and whether the port allows scrubber ships.
+  - **Cell Data:** To reduce overhead, cell-level logging (i.e. checking if a cell contains a Ship or a ScrubberTrail) happens **only every 10 steps**. Only cells with activity are recorded.
+
+  Each call to this function returns lists of new data entries for ships, ports, and active grid cells.
+
+- **Experiment Run and Bulk Insert (Function: run_experiment):**  
+  In the `run_experiment` function:
+  - An experiment record is first inserted into the database to generate an `experiment_id` that links all future data.
+  - The Mesa model is then initialized and run for a specified number of steps.
+  - At each step, the data from `collect_simulation_state` is accumulated in memory (i.e. appended to lists for ships, ports, and cells).
+  - After the simulation completes, the accumulated data is converted into Pandas DataFrames and inserted into the database using a **bulk insert**. This minimizes database transactions and improves performance.
+
+- **Performance Considerations:**  
+  By logging only cells with activity and sampling cell data only every 10 steps, the script reduces the amount of data written to the database—helping the overall experiment run faster.
+
+This module provides a robust mechanism for capturing the evolution of ship, port, and cell states over time, enabling later analysis and visualization (for instance, on a Mapbox instance).
