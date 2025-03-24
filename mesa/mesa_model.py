@@ -49,10 +49,17 @@ class Port(Agent):
         M-medium, L-large
         """
         if capacity == 'M':
-            self.port_capacity = 5
+            base_capacity = 5
         elif capacity == 'L':
-            self.port_capacity = 10
-        return self.port_capacity
+            base_capacity = 10
+        else:
+            base_capacity = 3
+        # Scale base capacity by the ratio of total ships to number of ports
+        num_ports = len(Port.raw_port_data)
+        # Assume self.model.num_ships is available from model parameters
+        scaling_factor = self.model.num_ships / num_ports
+        scaled_capacity = int(base_capacity * scaling_factor)
+        return scaled_capacity
     
     def dock_ship(self, ship):
         """
@@ -91,6 +98,12 @@ class Ship(Agent):
     """
     def __init__(self, unique_id, model):
         super().__init__(unique_id, model)
+        # assign ship type based on empirical proportions
+        self.ship_type = self.model.random.choices(
+            population=['cargo', 'tanker', 'fishing', 'other', 'tug', 'passenger', 'hsc', 'dredging', 'search'],
+            weights=[0.532, 0.213, 0.106, 0.032, 0.032, 0.053, 0.011, 0.011, 0.011],
+            k=1
+        )[0]
         #ship is not docked in the first step
         self.docked = False
         #steps that ship was docked
@@ -99,8 +112,14 @@ class Ship(Agent):
         self.route = []
         self.current_target_index = 0
         
-        # Mark as scrubber ship with 30% probability.
-        self.is_scrubber = (self.model.random.random() < 0.3)
+        # update scrubber probability based on ship type
+        if self.ship_type == 'cargo':
+            scrubber_prob = 0.18
+        elif self.ship_type == 'tanker':
+            scrubber_prob = 0.13
+        else:
+            scrubber_prob = 0.05
+        self.is_scrubber = (self.model.random.random() < scrubber_prob)
         
         # Count the steps the ship is waiting to dock.
         self.wait_time = 0
@@ -330,9 +349,58 @@ class ShipPortModel(Model):
                 x, y = self.random.choice(water_cells)
                 self.grid.place_agent(ship, (x, y))
                 self.schedule.add(ship)
+            # determine ship route based on ship type and port popularity
             ports = [agent for agent in self.schedule.agents if isinstance(agent, Port)]
-            if len(ports) >= 3:
-                ship.route = self.random.sample(ports, 3)
+            if len(ports) > 0:
+                k = min(3, len(ports))
+                # base port popularity (based on empirical data)
+                def base_popularity(port):
+                    port_name = port.name.lower()
+                    if port_name == "rotterdam":
+                        return 8
+                    elif port_name == "antwerp":
+                        return 5
+                    elif port_name in ["amsterdam", "hamburg"]:
+                        return 2
+                    else:
+                        return 1
+                    
+                # ship type specific factors
+                # higher number means they prefer busier ports
+                # might need tuning to match empirical data
+                ship_type_factors = {
+                    "cargo": 1.0,
+                    "tanker": 1.0,
+                    "fishing": 0.8,
+                    "other": 0.8,
+                    "tug": 0.5,
+                    "passenger": 1.2,
+                    "hsc": 1.2,
+                    "dredging": 0.6,
+                    "search": 0.7 
+                }
+                factor = ship_type_factors.get(ship.ship_type, 1.0)
+                # weighted list of routes to choose from
+                agent_weights = [base_popularity(port) * factor for port in ports]
+                
+                # algorithm for weighted sampling without replacement
+                def weighted_random_sampling(agents, weights, k):
+                    selected = []
+                    agents_copy = agents[:]
+                    weights_copy = weights[:]
+                    for _ in range(k):
+                        total = sum(weights_copy)
+                        r = self.random.random() * total
+                        upto = 0
+                        for idx, w in enumerate(weights_copy):
+                            upto += w
+                            if upto >= r:
+                                selected.append(agents_copy.pop(idx))
+                                weights_copy.pop(idx)
+                                break
+                    return selected
+                # we need to figure out how many ports ships typically visit (3 has been chosen arbitrarily)
+                ship.route = weighted_random_sampling(ports, agent_weights, 3)
                 
         # Data collector to track scrubber ships and trail data.
         self.datacollector = DataCollector(
@@ -380,7 +448,21 @@ def agent_portrayal(agent):
             "current_capacity": agent.current_capacity 
         }
     elif isinstance(agent, Ship):
-        color = "blue" if agent.docked else "green"
+        # Define color mapping for each ship type.
+        ship_colors = {
+            "cargo": "blue",
+            "tanker": "navy",
+            "fishing": "yellow",
+            "other": "gray",
+            "tug": "orange",
+            "passenger": "pink",
+            "hsc": "purple",
+            "dredging": "brown",
+            "search": "green"
+        }
+        # Select color based on ship type.
+        color = ship_colors.get(agent.ship_type, "green")
+        # Optional override: if the ship is a scrubber then color it red.
         if agent.is_scrubber:
             color = "red"
         return {
