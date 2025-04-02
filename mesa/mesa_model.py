@@ -119,6 +119,23 @@ class ShipPortModel(Model):
         
         self.spawn_duration = 3
         
+        # Initialize the datacollector.
+        self.datacollector = DataCollector(
+            model_reporters = {
+                "NumScrubberShips": lambda m: sum(1 for a in m.schedule.agents if isinstance(a, Ship) and getattr(a, 'is_scrubber', False)),
+                "NumScrubberTrails": lambda m: sum(1 for a in m.schedule.agents if type(a) is ScrubberTrail),
+                "TotalScrubberWater": lambda m: sum(a.water_units for a in m.schedule.agents if type(a) is ScrubberTrail),
+                "NumShips": lambda m: sum(1 for a in m.schedule.agents if isinstance(a, Ship)),
+                "TotalDockedShips": lambda m: sum(len(a.docked_ships) for a in m.schedule.agents if isinstance(a, Port)),
+                "AvgPortPopularity": lambda m: (sum(len(a.docked_ships) for a in m.schedule.agents if isinstance(a, Port)) 
+                                                / max(1, sum(1 for a in m.schedule.agents if isinstance(a, Port)))),
+                "NumPortsBan": lambda m: sum(1 for a in m.schedule.agents if isinstance(a, Port) and not a.allow_scrubber),
+                "TotalPortRevenue": lambda m: sum(a.revenue for a in m.schedule.agents if isinstance(a, Port)),
+                "AvgPortRevenue": lambda m: (sum(a.revenue for a in m.schedule.agents if isinstance(a, Port)) 
+                                             / max(1, sum(1 for a in m.schedule.agents if isinstance(a, Port))))
+            }
+        )
+        
     def get_average_penalty(self):
         if self.scrubber_penalty_count > 0:
             return self.scrubber_penalty_sum / self.scrubber_penalty_count
@@ -202,20 +219,7 @@ class ShipPortModel(Model):
                 return selected
             # we need to figure out how many ports ships typically visit (3 has been chosen arbitrarily)
             new_ship.route = weighted_random_sampling(ports, agent_weights, 3)
-            
-        # Data collector to track scrubber ships and trail data.
-        self.datacollector = DataCollector(
-            model_reporters = {
-                "NumScrubberShips": lambda m: sum(1 for a in m.schedule.agents if isinstance(a, Ship) and getattr(a, 'is_scrubber', False)),
-                "NumScrubberTrails": lambda m: sum(1 for a in m.schedule.agents if type(a) is ScrubberTrail),
-                "TotalScrubberWater": lambda m: sum(a.water_units for a in m.schedule.agents if type(a) is ScrubberTrail),
-                "NumShips": lambda m: sum(1 for a in m.schedule.agents if isinstance(a, Ship)),
-                "TotalDockedShips": lambda m: sum(len(a.docked_ships) for a in m.schedule.agents if isinstance(a, Port)),
-                "AvgPortPopularity": lambda m: (sum(len(a.docked_ships) for a in m.schedule.agents if isinstance(a, Port)) 
-                                                / max(1, sum(1 for a in m.schedule.agents if isinstance(a, Port)))),
-                "NumPortsBan": lambda m: sum(1 for a in m.schedule.agents if isinstance(a, Port) and not a.allow_scrubber)
-            }
-        )
+
         return new_ship
             
 

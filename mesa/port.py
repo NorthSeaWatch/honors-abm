@@ -39,7 +39,21 @@ class Port(Agent):
         self.current_capacity = 0
         self.docked_ships = []
         self.allow_scrubber = (self.model.random.random() < self.model.prob_allow_scrubbers)
-    
+
+        self.revenue = 0
+        
+        # base fees for differnet ship types (needs empirical backing)
+        self.base_fees = {
+            "cargo": 100,
+            "tanker": 120,
+            "fishing": 50,
+            "other": 40,
+            "tug": 30,
+            "passenger": 80,
+            "hsc": 60,
+            "dredging": 35,
+            "search": 20
+        }
 
     def port_size(self, capacity):
         """
@@ -59,6 +73,15 @@ class Port(Agent):
         scaled_capacity = int(base_capacity * scaling_factor)
         return scaled_capacity
     
+    def calculate_docking_fee(self, ship):
+        """
+        Calculate the docking fee based on ship type and current occupancy.
+        The fee is adjustede dynamically: the more full the port, the higher the fee 
+        """
+        base_fee = self.base_fees.get(ship.ship_type, 40)
+        occupancy_ratio = self.current_capacity / self.port_capacity if self.port_capacity > 0 else 0
+        multiplier = 1 + occupancy_ratio
+        return base_fee * multiplier
     def dock_ship(self, ship):
         """
         Attempt to dock a ship at this port.
@@ -67,8 +90,11 @@ class Port(Agent):
         if ship.is_scrubber and not self.allow_scrubber:
             return False
         if self.current_capacity < self.port_capacity:
+            fee = self.calculate_docking_fee(ship)
+            self.revenue += fee
             self.current_capacity += 1
             self.docked_ships.append(ship)
+            print(f"Port {self.name}: Ship {ship.unique_id} docked, fee charged: {fee:.2f}, total revenue: {self.revenue:.2f}")
             return True
         return False
     

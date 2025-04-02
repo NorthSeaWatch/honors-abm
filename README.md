@@ -9,9 +9,11 @@ The simulation contains several agent types:
 - **Port Agents:**  
   - **Data and Capacity Scaling:**  
     Port data is loaded from `filtered_port.csv` and includes the port's name, geographic coordinates, and a categorical capacity (e.g., `M`, `L`). A helper function converts this capacity into a base integer (e.g., `M` becomes 5, `L` becomes 10) which is then scaled by the ratio of total ships to ports.
-  - **Docking Logic:**  
-    Ports decide whether to allow docking based on current capacity and a randomized policy on scrubber acceptance. If a ship is scrubber-equipped and exceeds a port's policy (i.e. the port does not allow scrubbers), docking is rejected.
-
+   - **Docking Logic and Revenue:**  
+    - Ports decide whether to allow docking based on current capacity and a randomized policy on scrubber acceptance.
+    - Each docking event generates revenue based on a base fee for the ship type and a dynamic pricing multiplier. The multiplier increases with the current occupancy, reflecting higher fees when the port is fuller.
+    - Collected revenue is tracked for each port and exported as part of the simulation data.
+  
 - **Ship Agents:**  
   - **Type Assignment & Scrubber Status:**  
     Each ship is assigned a type (cargo, tanker, fishing, etc.) based on empirical proportions. Depending on the type, a base probability is set for having a scrubber (e.g., approximately 18% for cargo ships, 13% for tankers, 5% for others). This probability is then adjusted downward if previous scrubber penalties have been recorded.

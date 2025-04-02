@@ -70,6 +70,7 @@ def create_tables():
             port_capacity INTEGER,
             current_capacity INTEGER,
             allow_scrubber BOOLEAN,
+            revenue NUMERIC,
             x INTEGER,
             y INTEGER,
             FOREIGN KEY (experiment_id) REFERENCES experiments(experiment_id)
@@ -126,6 +127,7 @@ def collect_simulation_state(model, experiment_id, step):
                 "port_capacity": agent.port_capacity,
                 "current_capacity": agent.current_capacity,
                 "allow_scrubber": agent.allow_scrubber,
+                "revenue": agent.revenue,
                 "x": agent.pos[0],
                 "y": agent.pos[1]
             })
