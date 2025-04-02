@@ -1,4 +1,5 @@
 from mesa import Agent, Model
+import math
 from mesa.time import RandomActivation
 from mesa.space import MultiGrid
 #leave this import for now for future data collection and visualization
@@ -32,6 +33,10 @@ class ShipPortModel(Model):
         # Extra environment settings
         self.ship_wait_time = ship_wait_time
         self.prob_allow_scrubbers = prob_allow_scrubbers
+        
+        # initialize scrubber penalty accumulators
+        self.scrubber_penalty_sum = 0
+        self.scrubber_penalty_count = 0
 
 
         #!DO NOT TRY TO CHANGE THIS WITHOUT ANDREY'S CONSENT CAUSE HE LOST HIS ABILITY TO SEE TRYING TO SET IT UP!
@@ -105,75 +110,99 @@ class ShipPortModel(Model):
             y = max(0, min(height - 1, y))
             self.grid.place_agent(port, (x, y))
             self.schedule.add(port) 
+            
         num_ports = len(Port.raw_port_data)
         
-        # placing ships
-        for i in range(num_ports, num_ships):
-            ship = Ship(i, self)
-            # checking for water cells to place ships
+        # gradual ship spawning
+        self.next_ship_id = num_ports
+        self.remaining_ships = num_ships
+        
+        self.spawn_duration = 3
+        
+    def get_average_penalty(self):
+        if self.scrubber_penalty_count > 0:
+            return self.scrubber_penalty_sum / self.scrubber_penalty_count
+        return 0    
+    
+    def spawn_ship(self, ship_id):
+        """Spawns a new Ship agent at a water cell along the bottom of the grid"""
+        # create the new ship
+        new_ship = Ship(ship_id, self)
+        # Select a water cell from the bottom row.
+        bottom_y = 0
+        x_range = min(38, self.grid.width)
+        possible_positions = []
+        for x in range(x_range):
+            pos = (x, bottom_y)
+            cell_contents = self.grid.get_cell_list_contents(pos)
+            if any(isinstance(agent, Terrain) and agent.terrain_type == 'water' for agent in cell_contents):
+                possible_positions.append(pos)
+        if possible_positions:
+            start_pos = self.random.choice(possible_positions)
+        else:
+            # fallback: choose any water cell in grid.
             water_cells = []
-            for x in range(width):
-                for y in range(height):
+            for x in range(self.grid.width):
+                for y in range(self.grid.height):
                     cell_contents = self.grid.get_cell_list_contents((x, y))
                     if any(isinstance(agent, Terrain) and agent.terrain_type == 'water' for agent in cell_contents):
                         water_cells.append((x, y))
-            if water_cells:
-                x, y = self.random.choice(water_cells)
-                self.grid.place_agent(ship, (x, y))
-                self.schedule.add(ship)
-            # determine ship route based on ship type and port popularity
-            ports = [agent for agent in self.schedule.agents if isinstance(agent, Port)]
-            if len(ports) > 0:
-                k = min(3, len(ports))
-                # base port popularity (based on empirical data)
-                def base_popularity(port):
-                    port_name = port.name.lower()
-                    if port_name == "rotterdam":
-                        return 8
-                    elif port_name == "antwerp":
-                        return 5
-                    elif port_name in ["amsterdam", "hamburg"]:
-                        return 2
-                    else:
-                        return 1
-                    
-                # ship type specific factors
-                # higher number means they prefer busier ports
-                # might need tuning to match empirical data
-                ship_type_factors = {
-                    "cargo": 1.0,
-                    "tanker": 1.0,
-                    "fishing": 0.8,
-                    "other": 0.8,
-                    "tug": 0.5,
-                    "passenger": 1.2,
-                    "hsc": 1.2,
-                    "dredging": 0.6,
-                    "search": 0.7 
-                }
-                factor = ship_type_factors.get(ship.ship_type, 1.0)
-                # weighted list of routes to choose from
-                agent_weights = [base_popularity(port) * factor for port in ports]
+            start_pos = self.random.choice(water_cells) if water_cells else (0, bottom_y)
+        self.grid.place_agent(new_ship, start_pos)
+        self.schedule.add(new_ship)
+        
+        # determine ship route based on ship type and port popularity
+        ports = [agent for agent in self.schedule.agents if isinstance(agent, Port)]
+        if ports:
+            # base port popularity (based on empirical data)
+            def base_popularity(port):
+                port_name = port.name.lower()
+                if port_name == "rotterdam":
+                    return 8
+                elif port_name == "antwerp":
+                    return 5
+                elif port_name in ["amsterdam", "hamburg"]:
+                    return 2
+                else:
+                    return 1
                 
-                # algorithm for weighted sampling without replacement
-                def weighted_random_sampling(agents, weights, k):
-                    selected = []
-                    agents_copy = agents[:]
-                    weights_copy = weights[:]
-                    for _ in range(k):
-                        total = sum(weights_copy)
-                        r = self.random.random() * total
-                        upto = 0
-                        for idx, w in enumerate(weights_copy):
-                            upto += w
-                            if upto >= r:
-                                selected.append(agents_copy.pop(idx))
-                                weights_copy.pop(idx)
-                                break
-                    return selected
-                # we need to figure out how many ports ships typically visit (3 has been chosen arbitrarily)
-                ship.route = weighted_random_sampling(ports, agent_weights, 3)
-                
+            # ship type specific factors
+            # higher number means they prefer busier ports
+            # might need tuning to match empirical data
+            ship_type_factors = {
+                "cargo": 1.0,
+                "tanker": 1.0,
+                "fishing": 0.8,
+                "other": 0.8,
+                "tug": 0.5,
+                "passenger": 1.2,
+                "hsc": 1.2,
+                "dredging": 0.6,
+                "search": 0.7 
+            }
+            factor = ship_type_factors.get(new_ship.ship_type, 1.0)
+            # weighted list of routes to choose from
+            agent_weights = [base_popularity(port) * factor for port in ports]
+            
+            # algorithm for weighted sampling without replacement
+            def weighted_random_sampling(agents, weights, k):
+                selected = []
+                agents_copy = agents[:]
+                weights_copy = weights[:]
+                for _ in range(k):
+                    total = sum(weights_copy)
+                    r = self.random.random() * total
+                    upto = 0
+                    for idx, w in enumerate(weights_copy):
+                        upto += w
+                        if upto >= r:
+                            selected.append(agents_copy.pop(idx))
+                            weights_copy.pop(idx)
+                            break
+                return selected
+            # we need to figure out how many ports ships typically visit (3 has been chosen arbitrarily)
+            new_ship.route = weighted_random_sampling(ports, agent_weights, 3)
+            
         # Data collector to track scrubber ships and trail data.
         self.datacollector = DataCollector(
             model_reporters = {
@@ -187,11 +216,25 @@ class ShipPortModel(Model):
                 "NumPortsBan": lambda m: sum(1 for a in m.schedule.agents if isinstance(a, Port) and not a.allow_scrubber)
             }
         )
-    
+        return new_ship
+            
+
     def step(self):
         """
-        Step method
+        Step method: gradually spawn ships during initial time steps
         """
+         # Gradually spawn ships over spawn_duration steps.
+        current_step = self.schedule.steps  # scheduler steps so far
+        if current_step < self.spawn_duration and self.remaining_ships > 0:
+            # Calculate how many ships to spawn this step.
+            spawn_rate = math.ceil(self.remaining_ships / (self.spawn_duration - current_step))
+            for _ in range(spawn_rate):
+                if self.remaining_ships <= 0:
+                    break
+                self.spawn_ship(self.next_ship_id)
+                self.next_ship_id += 1
+                self.remaining_ships -= 1
+                
         self.schedule.step()
         self.datacollector.collect(self)
 
@@ -283,9 +326,9 @@ if __name__ == "__main__":
         {
             'width': 100, 
             'height': 100, 
-            'num_ships': 120,
+            'num_ships': 300,
             'ship_wait_time': 100,
-            'prob_allow_scrubbers': 0.5       # chance a port allows scrubber ships
+            'prob_allow_scrubbers': 0.8      # chance a port allows scrubber ships
 
         }
     )

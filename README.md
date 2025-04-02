@@ -1,65 +1,61 @@
 # North Sea Ship Simulation
 
-This project is an Agent-Based Model (ABM) simulation built with Mesa that models ship movement and port interactions in the North Sea. The simulation is designed to study scrubber water discharge from ships—particularly large cargo vessels with scrubber systems—and how ships interact with ports of varying capacity and popularity.
+This project is an Agent-Based Model (ABM) built with Mesa to simulate ship movement and port interactions in the North Sea. It focuses on studying scrubber water discharge from ships (especially large cargo vessels) and how these vessels interact with ports that differ in capacity, popularity, and scrubber policy.
 
 ## Overview
 
-The simulation includes several agents with specific roles:
+The simulation contains several agent types:
 
 - **Port Agents:**  
-  Represents ports (docks) in the simulation. Port data is loaded from a CSV file (`filtered_port.csv`) and includes attributes such as the port’s name, geographic coordinates, and categorical capacity (`M`, `L`, etc.).  
-  - **Capacity Scaling:**  
-    Each port’s base capacity is adjusted by scaling with the ratio of the total number of ships in the simulation to the number of ports. This allows the model to better reflect different load conditions as the number of ships changes.
+  - **Data and Capacity Scaling:**  
+    Port data is loaded from `filtered_port.csv` and includes the port's name, geographic coordinates, and a categorical capacity (e.g., `M`, `L`). A helper function converts this capacity into a base integer (e.g., `M` becomes 5, `L` becomes 10) which is then scaled by the ratio of total ships to ports.
   - **Docking Logic:**  
-    Ports determine whether to allow docking based on current capacity and if the port allows scrubber-equipped ships.
+    Ports decide whether to allow docking based on current capacity and a randomized policy on scrubber acceptance. If a ship is scrubber-equipped and exceeds a port's policy (i.e. the port does not allow scrubbers), docking is rejected.
 
 - **Ship Agents:**  
-  Represents dynamic ship entities that navigate the grid.  
-  - **Type Assignment:**  
-    Each ship is randomly assigned a type (such as cargo, tanker, fishing, etc.) based on empirical proportions.  
-  - **Scrubber Usage:**  
-    Depending on the ship type, the probability that a ship has a scrubber is set (e.g., 18% for cargo ships, 13% for tankers, 5% for others by default). Ships with scrubbers are visually marked (colored red if they have scrubbers) to highlight potential environmental impact.
-  - **Movement and Routing:**  
-    Ships are given routes based on port popularity and ship-type specific factors using a weighted random sampling algorithm without replacement. The algorithm combines a base popularity metric (e.g., Rotterdam being most popular) with a factor that adjusts the weight based on the ship's type.  
-    - Simple step-by-step movement is computed using differences in grid coordinates (using a sign function) and validated to ensure movement only occurs over water.
-    - When ships are near a target port, an attempt is made to dock; if a port is full or not permitting a ship (especially scrubber-equipped ones where appropriate), the ship continues its motion.
+  - **Type Assignment & Scrubber Status:**  
+    Each ship is assigned a type (cargo, tanker, fishing, etc.) based on empirical proportions. Depending on the type, a base probability is set for having a scrubber (e.g., approximately 18% for cargo ships, 13% for tankers, 5% for others). This probability is then adjusted downward if previous scrubber penalties have been recorded.
+  - **Routing and Movement:**  
+    Ships are given a route through a weighted random sampling of ports (typically three per route) based on port popularity and ship-type factors.  
+    The movement logic is now smarter:
+    - **Smart Routing:**  
+      Ships use a helper method to compute an ideal move toward the target. If the ideal cell is blocked or contains a port, the method examines neighboring water cells and selects the one that minimizes the Euclidean distance to the target.
+    - **Docking:**  
+      When near a target port, a ship attempts to dock. If docking fails due to capacity constraints, the ship waits at its current position and reattempts docking each subsequent step.
+    - **Alternate Routing for Scrubbers:**  
+      When a scrubber ship is rejected because the target port does not allow scrubbers, a penalty is applied to the vessel. This penalty adjusts the chance for future ships to be scrubber-equipped. The rejected port is then skipped in favor of an alternate route.
+  - **Exiting and Replacement:**  
+    Once a ship completes its route or its waiting time expires, it navigates toward a designated exit zone (restricted to water cells on the lower part of the grid, e.g. within the first 38 cells on the x-axis). The ship leaves a scrubber trail even while exiting. Upon exit, the ship is removed from the simulation and immediately replaced by a new ship, keeping the total number of ships constant.
 
 - **ScrubberTrail Agents:**  
-  These agents model the trail left behind by scrubber-equipped ships as they move.  
-  - They carry a fixed number of water units and fade (are removed) after a set lifespan, which helps track cumulative scrubber water discharge over time.
+  Representing the trail of scrubber water discharged by ships, these agents carry a fixed number of water units and fade over a set lifespan. They allow visualization of cumulative environmental impact over time.
 
 - **Terrain Agents:**  
-  Represents the underlying grid representing water and land.  
-  - A `Terrain` agent is placed on every grid cell, with the type determined from a series of polygons defining land regions versus water.
-    
-## Key Model Components
+  The underlying grid is populated with Terrain agents (land or water) based on geographic polygon definitions. Ships are only allowed to move over water cells, and movement through ports is prohibited.
 
-- **Port Capacity Scaling:**  
-  The `port_size` method in the Port class converts a categorical capacity into a base integer (e.g., `M` becomes 5, `L` becomes 10), which is then scaled by the ratio of the total number of ships to the number of ports. This ensures that as more ships are added, each port's effective capacity increases proportionally.
+## Key Enhancements
 
-- **Ship Route Selection:**  
-  The route for each ship is chosen by weighting ports according to both empirical port popularity and ship-type specific factors. A custom weighted random sampling algorithm is used:
-  - The algorithm creates a copy of the list of ports and weights.
-  - Iterates to randomly select a port based on the calculated weights.
-  - This sampling is done without replacement to achieve diversity in the ship's route (typically, each ship will have a route containing three ports).
+1. **Waiting to Dock:**  
+   Ships that cannot dock due to port capacity will remain in place—trying to dock every step until capacity is available.
 
-- **Agent Visualizations:**  
-  The agent portrayal function defines how each agent is rendered:
-  - **Ports:** Colored brown or black (depending on scrubber policy) with size based on capacity.
-  - **Ships:** Colored based on their type (e.g., blue for cargo, navy for tanker, yellow for fishing, etc.). Ships with scrubbers override the color to red.
-  - **Scrubber Trails:** Displayed as orange circles.
-  - **Terrain:** Land is rendered in silver and water in light blue.
+2. **Scrubber Penalty and Alternate Routing:**  
+   When a scrubber ship is rejected by a port (because the port does not allow scrubbers), a penalty counter is increased (both on the ship and cumulatively in the model). This penalty diminishes the probability that future ships will be scrubber-equipped, while the ship then seeks an alternate port.
+
+3. **Exiting and Replacement:**  
+   Once a ship completes its route or times out waiting, it exits the simulation through a designated exit zone at the bottom of the grid. Importantly, even when exiting, scrubber trails are recorded. As a ship departs, a replacement ship is spawned to maintain a constant number of ships in the simulation.
+
+4. **Improved Movement:**  
+   Ship movement has been enhanced to be less random. If the ideal move toward a target is blocked, the ship examines its valid neighboring cells to select the best move (the one that minimizes the distance to the target) ensuring smoother, more realistic navigation that avoids passing through port cells.
 
 ## Running the Simulation
 
-The model is integrated with Mesa’s visualization modules. To run the simulation, open Visual Studio Code (on your Mac) and run the following command from the terminal:
+The model uses Mesa’s visualization modules. To run the simulation, open Visual Studio Code on your Mac and execute:
 
 ```
 python mesa_model.py
 ```
 
-This command starts the **ModularServer** with a CanvasGrid visualization, allowing you to observe ship movements, docking events, and environmental effects in real-time.
-
+This starts the **ModularServer** with a CanvasGrid visualization where you can observe ship movements, docking events (including waiting and alternate routing), scrubber trail markings, and ship replacement upon exit.
 
 ## Data Logging and Export (abm_export.py)
 
