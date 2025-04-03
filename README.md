@@ -89,3 +89,27 @@ This script is designed to collect and export simulation data from the Mesa mode
   By logging only cells with activity and sampling cell data only every 10 steps, the script reduces the amount of data written to the database—helping the overall experiment run faster.
 
 This module provides a robust mechanism for capturing the evolution of ship, port, and cell states over time, enabling later analysis and visualization (for instance, on a Mapbox instance).
+
+## Dashboard Interface
+
+The dashboard (implemented in `dashboard.py`) provides an interactive user interface for monitoring and controlling the simulation. It leverages Dash and Plotly Express to display real-time data and visualizations about the simulation state. Key features include:
+
+- **Simulation Controls:**  
+  An expandable accordion lets users adjust simulation parameters—such as grid dimensions and the number of ships—prior to launching the simulation. Buttons to start, reset, or run multiple simulation steps are provided for manual control.
+
+- **Real-Time Visualizations:**  
+  - **Time Series Charts:** Display metrics like total ships, scrubber trails, and average penalties over simulation steps.  
+  - **Pie & Bar Charts:** Show breakdowns of ship types and scrubber status.
+  - **Interactive Port Map:** A geographic scatter plot zoomed to focus on the North Sea, allowing users to visually track port activity and docking events.
+  - **Port Details Table and Policy Charts:** Summarize port-specific data such as current capacity, revenue, and scrubber policies.
+
+- **Dynamic Updates:**  
+  The dashboard updates on a set interval or via user-triggered events (e.g., clicking “Run Step”) by calling the `collect_model_data` function and refreshing various charts and data tables. As the simulation runs, the dashboard continuously provides feedback on the simulation state.
+
+This module is designed to offer an intuitive visualization layer, enabling users to quickly assess and interact with the simulation as it evolves.
+
+   ```bash
+docker build -t ship-port-dashboard .
+docker run -p 8051:8051 ship-port-dashboard
+
+   ```

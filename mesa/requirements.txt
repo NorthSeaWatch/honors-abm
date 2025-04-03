@@ -12,7 +12,7 @@ decorator==5.2.1
 executing==2.2.0
 fonttools==4.56.0
 idna==3.10
-ipython==9.0.1
+ipython
 ipython_pygments_lexers==1.1.1
 jedi==0.19.2
 Jinja2==3.1.5
@@ -55,3 +55,7 @@ types-python-dateutil==2.9.0.20241206
 tzdata==2025.1
 urllib3==2.3.0
 wcwidth==0.2.13
+dash==3.0.2
+dash-bootstrap-components==2.0.0
+plotly==6.0.1
+gunicorn==21.2.0

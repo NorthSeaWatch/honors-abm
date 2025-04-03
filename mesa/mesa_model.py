@@ -117,7 +117,7 @@ class ShipPortModel(Model):
         self.next_ship_id = num_ports
         self.remaining_ships = num_ships
         
-        self.spawn_duration = 3
+        self.spawn_duration = 5
         
         # Initialize the datacollector.
         self.datacollector = DataCollector(
@@ -171,17 +171,10 @@ class ShipPortModel(Model):
         # determine ship route based on ship type and port popularity
         ports = [agent for agent in self.schedule.agents if isinstance(agent, Port)]
         if ports:
-            # base port popularity (based on empirical data)
             def base_popularity(port):
-                port_name = port.name.lower()
-                if port_name == "rotterdam":
-                    return 8
-                elif port_name == "antwerp":
-                    return 5
-                elif port_name in ["amsterdam", "hamburg"]:
-                    return 2
-                else:
-                    return 1
+            # Use port capacity so that larger ports are slightly more attractive,
+            # but all ports start near 1.
+                return port.port_capacity / 10.0  # adjust divisor as needed
                 
             # ship type specific factors
             # higher number means they prefer busier ports
@@ -189,13 +182,13 @@ class ShipPortModel(Model):
             ship_type_factors = {
                 "cargo": 1.0,
                 "tanker": 1.0,
-                "fishing": 0.8,
-                "other": 0.8,
-                "tug": 0.5,
-                "passenger": 1.2,
-                "hsc": 1.2,
-                "dredging": 0.6,
-                "search": 0.7 
+                "fishing": 0.9,
+                "other": 0.9,
+                "tug": 0.8,
+                "passenger": 1.0,
+                "hsc": 1.0,
+                "dredging": 0.8,
+                "search": 0.8 
             }
             factor = ship_type_factors.get(new_ship.ship_type, 1.0)
             # weighted list of routes to choose from
@@ -208,6 +201,8 @@ class ShipPortModel(Model):
                 weights_copy = weights[:]
                 for _ in range(k):
                     total = sum(weights_copy)
+                    if total == 0:
+                        break
                     r = self.random.random() * total
                     upto = 0
                     for idx, w in enumerate(weights_copy):
@@ -217,9 +212,9 @@ class ShipPortModel(Model):
                             weights_copy.pop(idx)
                             break
                 return selected
-            # we need to figure out how many ports ships typically visit (3 has been chosen arbitrarily)
-            new_ship.route = weighted_random_sampling(ports, agent_weights, 3)
-
+            
+            # Choose how many ports to visit; having a larger k (within reasonable bounds) may allow more ports to be involved.
+            new_ship.route = weighted_random_sampling(ports, agent_weights, k=3)
         return new_ship
             
 
