@@ -89,28 +89,12 @@ class ShipPortModel(Model):
                 self.grid.place_agent(terrain, (x, y))
                 self.schedule.add(terrain)
         
-        # calculation for min/max lan and lon to scale ports to the map 
-        min_lat = min(port["lat"] for port in Port.raw_port_data)
-        max_lat = max(port["lat"] for port in Port.raw_port_data)
-        min_lon = min(port["lon"] for port in Port.raw_port_data)
-        max_lon = max(port["lon"] for port in Port.raw_port_data)
-        #storing for conversion
-        self.min_lat = min_lat
-        self.max_lat = max_lat
-        self.min_lon = min_lon
-        self.max_lon = max_lon
-        
         # ports at scaled geo locations
         for i, port_data in enumerate(Port.raw_port_data):
             port = Port(i, self, port_data)
-            # convert lat and lon onto grid
-            x, y = self.lat_lon_to_grid(port_data["lat"], port_data["lon"])
-            # bound arrangement 
-            x = max(0, min(width - 1, x))
-            y = max(0, min(height - 1, y))
+            x, y = int(port_data['X']), int(port_data['Y'])
             self.grid.place_agent(port, (x, y))
-            self.schedule.add(port) 
-            
+            self.schedule.add(port)
         num_ports = len(Port.raw_port_data)
         
         # gradual ship spawning

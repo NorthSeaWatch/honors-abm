@@ -6,7 +6,7 @@ from mesa.datacollection import DataCollector
 from mesa.visualization.modules import CanvasGrid
 from mesa.visualization.ModularVisualization import ModularServer
 import csv
-from shapely.geometry import Polygon, Point
+
 
 class Port(Agent):
     """
@@ -16,7 +16,7 @@ class Port(Agent):
     #variable to store all port data
     raw_port_data = []
     # loading port information from filtered_port.csv
-    with open('filtered_port.csv', 'r') as port_data:
+    with open('filtered_ports_with_x_y.csv', 'r') as port_data:
         open_port = csv.DictReader(port_data)
         for row in open_port:
             raw_port_data.append({
@@ -24,7 +24,9 @@ class Port(Agent):
                 "name": row["PORT_NAME"],
                 "lat": float(row["LATITUDE"]),
                 "lon": float(row["LONGITUDE"]),
-                "capacity": row["HARBORSIZE"]
+                "capacity": row["HARBORSIZE"],
+                'X': row['X'],
+                'Y': row['Y']
             })
     
     #using information from parent class Agent (unique_id and model)
@@ -82,6 +84,7 @@ class Port(Agent):
         occupancy_ratio = self.current_capacity / self.port_capacity if self.port_capacity > 0 else 0
         multiplier = 1 + occupancy_ratio
         return base_fee * multiplier
+
     def dock_ship(self, ship):
         """
         Attempt to dock a ship at this port.
