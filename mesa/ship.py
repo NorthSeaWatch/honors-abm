@@ -183,6 +183,12 @@ class Ship(Agent):
                         self.docking_steps = 0
                         self.wait_time = 0  # reset when docked
                         print(f'Ship {self.unique_id} docked at {target_port.name}')
+                        # Apply a half penalty if the policy at the docked port is "tax"
+                        if target_port.scrubber_policy == "tax" and self.is_scrubber:
+                            self.penalty += 0.5
+                            self.model.scrubber_penalty_sum += 0.5
+                            self.model.scrubber_penalty_count += 0.5
+                            print(f"Ship {self.unique_id} incurred a tax penalty of 0.5 at port {target_port.name}")
                     else:
                         # distinguish between rejection due to capacity vs. scrubber restrictions.
                         if self.is_scrubber and not target_port.allow_scrubber:

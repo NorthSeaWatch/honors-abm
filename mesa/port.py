@@ -30,7 +30,7 @@ class Port(Agent):
             })
     
     #using information from parent class Agent (unique_id and model)
-    def __init__(self, unique_id, model, port_data):
+    def __init__(self, unique_id, model, port_data, policy=None):
         super().__init__(unique_id, model)
         #storing port information in the port's instance of the class
         self.port_data = port_data
@@ -40,7 +40,17 @@ class Port(Agent):
         self.port_capacity = self.port_size(port_data["capacity"])
         self.current_capacity = 0
         self.docked_ships = []
-        self.allow_scrubber = (self.model.random.random() < self.model.prob_allow_scrubbers)
+        # Set the scrubber policy based on the provided parameter or model's default
+        if policy is not None:
+            self.scrubber_policy = policy
+        else:
+            # If there's a default policy in the model, use that
+            if model.port_policy and len(model.port_policy) > 0:
+                self.scrubber_policy = model.random.choice(model.port_policy)
+            else:
+                self.scrubber_policy = "allow"  # Default fallback
+                
+        self.allow_scrubber = self.scrubber_policy != "ban"
 
         self.revenue = 0
         
@@ -81,6 +91,11 @@ class Port(Agent):
         The fee is adjustede dynamically: the more full the port, the higher the fee 
         """
         base_fee = self.base_fees.get(ship.ship_type, 40)
+        if self.scrubber_policy == "tax" and ship.is_scrubber:
+            base_fee *= 1.5 # increase fee for scrubbers
+        elif self.scrubber_policy == "subsidy" and not ship.is_scrubber:
+            base_fee *= 0.8 # discount for non-scrubbers
+            
         occupancy_ratio = self.current_capacity / self.port_capacity if self.port_capacity > 0 else 0
         multiplier = 1 + occupancy_ratio
         return base_fee * multiplier
@@ -90,8 +105,9 @@ class Port(Agent):
         Attempt to dock a ship at this port.
         Returns True if docking was successful, False otherwise.
         """
-        if ship.is_scrubber and not self.allow_scrubber:
+        if ship.is_scrubber and self.scrubber_policy == "ban":
             return False
+        
         if self.current_capacity < self.port_capacity:
             fee = self.calculate_docking_fee(ship)
             self.revenue += fee
