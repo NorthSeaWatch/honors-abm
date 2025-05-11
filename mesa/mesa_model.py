@@ -1,11 +1,13 @@
 from mesa import Agent, Model
 import math
+import numpy as np
 from mesa.time import RandomActivation
 from mesa.space import MultiGrid
 #leave this import for now for future data collection and visualization
 from mesa.datacollection import DataCollector
 from mesa.visualization.modules import CanvasGrid
 from mesa.visualization.ModularVisualization import ModularServer
+from mesa.visualization.UserParam import UserSettableParameter, Slider, Choice
 import csv
 from shapely.geometry import Polygon, Point
 # Import Port and Ship from their modules
@@ -18,7 +20,7 @@ class ShipPortModel(Model):
     """"
     Simulation class that runs the model logic.
     """
-    def __init__(self, width, height, num_ships, ship_wait_time=20, prob_allow_scrubbers=0.5):
+    def __init__(self, width, height, num_ships, ship_wait_time=20, port_policy="allow", selected_port=None, selected_policy=None, custom_port_policies="None"):
         self.num_ships = num_ships
         # torus False means ships cannot travel to the other side of the grid
         self.grid = MultiGrid(width, height, torus=False)
@@ -32,12 +34,26 @@ class ShipPortModel(Model):
         
         # Extra environment settings
         self.ship_wait_time = ship_wait_time
-        self.prob_allow_scrubbers = prob_allow_scrubbers
         
         # initialize scrubber penalty accumulators
         self.scrubber_penalty_sum = 0
         self.scrubber_penalty_count = 0
+        
+        self.port_policy = [p.strip() for p in port_policy.split(',') if p.strip()]
 
+        # Store the selected port and policy for UI interaction
+        self.selected_port = selected_port
+        self.selected_policy = selected_policy
+        
+        # Process custom port policies mapping (e.g., "amsterdam:ban, rotterdam:ban, hamburg:ban, antwerp:ban, london:ban")
+        if custom_port_policies != "None":
+            self.custom_port_policies = {}
+            for pair in custom_port_policies.split(','):
+                if ':' in pair:
+                    port_name, policy = pair.split(':', 1)
+                    self.custom_port_policies[port_name.strip().lower()] = policy.strip()
+        else:
+            self.custom_port_policies = {}
 
         #!DO NOT TRY TO CHANGE THIS WITHOUT ANDREY'S CONSENT CAUSE HE LOST HIS ABILITY TO SEE TRYING TO SET IT UP!
         land_regions = [
@@ -89,18 +105,26 @@ class ShipPortModel(Model):
                 self.grid.place_agent(terrain, (x, y))
                 self.schedule.add(terrain)
         
-        # ports at scaled geo locations
+        # Create port agents with potential custom policies.
         for i, port_data in enumerate(Port.raw_port_data):
-            port = Port(i, self, port_data)
+            # Check if a custom policy exists for this port (using lower-case names)
+            port_policy_for_agent = None
+            port_name_lc = port_data['name'].lower()
+            if self.custom_port_policies and port_name_lc in self.custom_port_policies:
+                port_policy_for_agent = self.custom_port_policies[port_name_lc]
+            # Otherwise, if UI was used to select a specific port policy, then apply it.
+            elif selected_port != "None" and selected_policy != "None":
+                if port_data['name'] == selected_port:
+                    port_policy_for_agent = selected_policy
+            # Create the Port agent with the determined policy.
+            port = Port(i, self, port_data, policy=port_policy_for_agent)
             x, y = int(port_data['X']), int(port_data['Y'])
             self.grid.place_agent(port, (x, y))
             self.schedule.add(port)
-        num_ports = len(Port.raw_port_data)
         
-        # gradual ship spawning
+        num_ports = len(Port.raw_port_data)
         self.next_ship_id = num_ports
         self.remaining_ships = num_ships
-        
         self.spawn_duration = 3
         
         # Initialize the datacollector.
@@ -113,10 +137,18 @@ class ShipPortModel(Model):
                 "TotalDockedShips": lambda m: sum(len(a.docked_ships) for a in m.schedule.agents if isinstance(a, Port)),
                 "AvgPortPopularity": lambda m: (sum(len(a.docked_ships) for a in m.schedule.agents if isinstance(a, Port)) 
                                                 / max(1, sum(1 for a in m.schedule.agents if isinstance(a, Port)))),
-                "NumPortsBan": lambda m: sum(1 for a in m.schedule.agents if isinstance(a, Port) and not a.allow_scrubber),
+                "NumPortsBan": lambda m: sum(1 for a in m.schedule.agents if isinstance(a, Port) and  a.scrubber_policy == "ban"),
+                "NumPortsTax": lambda m: sum(1 for a in m.schedule.agents if isinstance(a, Port) and  a.scrubber_policy == "tax"),
+                "NumPortsSubsidy": lambda m: sum(1 for a in m.schedule.agents if isinstance(a, Port) and  a.scrubber_policy == "subsidy"),
+                "NumPortsAllow": lambda m: sum(1 for a in m.schedule.agents if isinstance(a, Port) and  a.scrubber_policy == "allow"),
                 "TotalPortRevenue": lambda m: sum(a.revenue for a in m.schedule.agents if isinstance(a, Port)),
                 "AvgPortRevenue": lambda m: (sum(a.revenue for a in m.schedule.agents if isinstance(a, Port)) 
-                                             / max(1, sum(1 for a in m.schedule.agents if isinstance(a, Port))))
+                                             / max(1, sum(1 for a in m.schedule.agents if isinstance(a, Port)))),
+                "PortRevenues": lambda m: {port.name.lower(): port.revenue
+                                            for port in m.schedule.agents if isinstance(port, Port)},
+                "PortDocking": lambda m: {port.name.lower(): len(port.docked_ships)
+                                          for port in m.schedule.agents if isinstance(port, Port)},
+                
             }
         )
         
@@ -183,8 +215,17 @@ class ShipPortModel(Model):
             }
             factor = ship_type_factors.get(new_ship.ship_type, 1.0)
             # weighted list of routes to choose from
-            agent_weights = [base_popularity(port) * factor for port in ports]
-            
+            agent_weights = []
+            for port in ports:
+                weight = base_popularity(port)
+                # Adjust weights based on port policy and ship type.
+                if port.scrubber_policy == 'ban' and new_ship.is_scrubber:
+                    weight = 0
+                elif port.scrubber_policy == 'tax' and new_ship.is_scrubber:
+                    weight *= 0.5  # reduce desirability for scrubber ships
+                elif port.scrubber_policy == 'subsidy' and not new_ship.is_scrubber:
+                    weight *= 1.5  # increase desirability for non-scrubber ships
+                agent_weights.append(weight * factor)
             # algorithm for weighted sampling without replacement
             def weighted_random_sampling(agents, weights, k):
                 selected = []
@@ -203,7 +244,6 @@ class ShipPortModel(Model):
                 return selected
             # we need to figure out how many ports ships typically visit (3 has been chosen arbitrarily)
             new_ship.route = weighted_random_sampling(ports, agent_weights, 3)
-
         return new_ship
             
 
@@ -236,7 +276,14 @@ class ShipPortModel(Model):
 
 def agent_portrayal(agent):
     if isinstance(agent, Port):
-        color = "brown" if agent.allow_scrubber else "black"
+        if agent.scrubber_policy == "ban":
+            color = "black"
+        elif agent.scrubber_policy == "tax":
+            color = "orange"
+        elif agent.scrubber_policy == "subsidy":
+            color = "green"
+        else:
+            color = "brown"
         grid_port_size = 2 if agent.port_capacity == 5 else 3
         return {
             "Shape": "rect", 
@@ -303,22 +350,48 @@ def agent_portrayal(agent):
                 "h": 1
             }
 
+# Create port name list for dropdown menu
+def get_port_names():
+    port_names = []
+    for port_data in Port.raw_port_data:
+        port_names.append(port_data["name"])
+    return port_names
+
+
 if __name__ == "__main__":
     # grid set up
     grid = CanvasGrid(agent_portrayal, 100, 100, 500, 500)
+    
+    # Get available port names for dropdown
+    port_names = []
+    with open('filtered_ports_with_x_y.csv', 'r') as port_data:
+        open_port = csv.DictReader(port_data)
+        for row in open_port:
+            port_names.append(row["PORT_NAME"])
+
+    # Define the model parameters that can be set by the user
+    model_params = {
+        'width': 100,
+        'height': 100,
+        'num_ships': Slider("Number of Ships", 50, 10, 200, 10),
+        'ship_wait_time': Slider("Ship Wait Time", 100, 10, 200, 10),
+        'port_policy': UserSettableParameter('choice', 'Default Port Policy', 
+                                           value='allow',
+                                           choices=['allow', 'ban', 'tax', 'subsidy']),
+        'selected_port': UserSettableParameter('choice', 'Select Port to Configure', 
+                                             value="None",
+                                             choices=["None"] + port_names),
+        'selected_policy': UserSettableParameter('choice', 'Policy for Selected Port', 
+                                               value="None",
+                                               choices=["None", 'allow', 'ban', 'tax', 'subsidy'])
+    }
 
     server = ModularServer(
         ShipPortModel, 
         [grid], 
         'North Sea Watch',
-        {
-            'width': 100, 
-            'height': 100, 
-            'num_ships': 300,
-            'ship_wait_time': 100,
-            'prob_allow_scrubbers': 0.8      # chance a port allows scrubber ships
-
-        }
+        model_params
     )
+    
     server.port = 8521  # example port
     server.launch()
