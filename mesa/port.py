@@ -113,7 +113,7 @@ class Port(Agent):
             self.revenue += fee
             self.current_capacity += 1
             self.docked_ships.append(ship)
-            print(f"Port {self.name}: Ship {ship.unique_id} docked, fee charged: {fee:.2f}, total revenue: {self.revenue:.2f}")
+            # print(f"Port {self.name}: Ship {ship.unique_id} docked, fee charged: {fee:.2f}, total revenue: {self.revenue:.2f}")
             return True
         return False
     

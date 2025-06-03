@@ -2,13 +2,31 @@
 
 This project is an Agent-Based Model (ABM) built with Mesa to simulate ship movement and port interactions in the North Sea. It focuses on studying scrubber water discharge from ships (especially large cargo vessels) and how these vessels interact with ports that differ in capacity, popularity, and scrubber policy.
 
+## Project Structure
+
+```
+honors-abm/
+├── mesa/
+│   ├── data/                  # Contains experiment data files
+│   ├── graphs/               # Output directory for visualization plots
+│   ├── mesa_model.py         # Core simulation model
+│   ├── ship.py              # Ship agent implementation
+│   ├── port.py              # Port agent implementation
+│   ├── plot_comparison.py   # Script for comparing experiment results
+│   ├── sweden_denmark_ban_exp.py    # Sweden/Denmark ban experiment
+│   ├── all_countries_ban_exp.py     # All countries ban experiment
+│   ├── nl_ban.py            # Netherlands ban experiment
+│   └── filtered_ports_with_x_y.csv  # Port data with grid coordinates
+└── requirements.txt         # Python dependencies
+```
+
 ## Overview
 
 The simulation contains several agent types:
 
 - **Port Agents:**  
   - **Data and Capacity Scaling:**  
-    Port data is loaded from `filtered_port.csv` and includes the port's name, geographic coordinates, and a categorical capacity (e.g., `M`, `L`). A helper function converts this capacity into a base integer (e.g., `M` becomes 5, `L` becomes 10) which is then scaled by the ratio of total ships to ports.
+    Port data is loaded from `filtered_ports_with_x_y.csv` and includes the port's name, geographic coordinates, and a categorical capacity (e.g., `M`, `L`). A helper function converts this capacity into a base integer (e.g., `M` becomes 5, `L` becomes 10) which is then scaled by the ratio of total ships to ports.
    - **Docking Logic and Revenue:**  
     - Ports decide whether to allow docking based on current capacity and a randomized policy on scrubber acceptance.
     - Each docking event generates revenue based on a base fee for the ship type and a dynamic pricing multiplier. The multiplier increases with the current occupancy, reflecting higher fees when the port is fuller.
@@ -35,57 +53,55 @@ The simulation contains several agent types:
 - **Terrain Agents:**  
   The underlying grid is populated with Terrain agents (land or water) based on geographic polygon definitions. Ships are only allowed to move over water cells, and movement through ports is prohibited.
 
-## Key Enhancements
+## Experiments
 
-1. **Waiting to Dock:**  
-   Ships that cannot dock due to port capacity will remain in place—trying to dock every step until capacity is available.
+The project includes three main experiments to study the effects of different scrubber ban policies:
 
-2. **Scrubber Penalty and Alternate Routing:**  
-   When a scrubber ship is rejected by a port (because the port does not allow scrubbers), a penalty counter is increased (both on the ship and cumulatively in the model). This penalty diminishes the probability that future ships will be scrubber-equipped, while the ship then seeks an alternate port.
+1. **Sweden/Denmark Ban** (`sweden_denmark_ban_exp.py`):
+   - Simulates the impact of banning scrubber water discharge in Swedish and Danish ports
+   - Analyzes changes in ship routing, port revenue, and environmental impact
 
-3. **Exiting and Replacement:**  
-   Once a ship completes its route or times out waiting, it exits the simulation through a designated exit zone at the bottom of the grid. Importantly, even when exiting, scrubber trails are recorded. As a ship departs, a replacement ship is spawned to maintain a constant number of ships in the simulation.
+2. **All Countries Ban** (`all_countries_ban_exp.py`):
+   - Models a scenario where all North Sea ports ban scrubber water discharge
+   - Examines system-wide effects on shipping patterns and environmental outcomes
 
-4. **Improved Movement:**  
-   Ship movement has been enhanced to be less random. If the ideal move toward a target is blocked, the ship examines its valid neighboring cells to select the best move (the one that minimizes the distance to the target) ensuring smoother, more realistic navigation that avoids passing through port cells.
+3. **Netherlands Ban** (`nl_ban.py`):
+   - Studies the effects of adding Netherlands to the Sweden/Denmark ban
+   - Evaluates regional impacts and potential ripple effects
+
+## Visualization and Analysis
+
+The `plot_comparison.py` script generates comparative visualizations of the experiment results, showing:
+- Relative revenue changes for each port
+- Relative docking frequency changes
+- Total scrubber water discharge patterns
+
+Results are saved in the `graphs/` directory as PNG files.
 
 ## Running the Simulation
 
-The model uses Mesa’s visualization modules. To run the simulation, open Visual Studio Code on your Mac and execute:
-
+1. Install dependencies:
+```bash
+pip install -r requirements.txt
 ```
-python mesa_model.py
+
+2. Run a specific experiment:
+```bash
+python mesa/mesa_model.py
 ```
 
-This starts the **ModularServer** with a CanvasGrid visualization where you can observe ship movements, docking events (including waiting and alternate routing), scrubber trail markings, and ship replacement upon exit.
+This starts the **ModularServer** with a CanvasGrid visualization where you can observe:
+- Ship movements and routing
+- Docking events (including waiting and alternate routing)
+- Scrubber trail markings
+- Ship replacement upon exit
 
-## Data Logging and Export (abm_export.py)
+## Data Organization
 
-This script is designed to collect and export simulation data from the Mesa model into a relational database using a bulk insert strategy. Here’s a breakdown of what each part does:
+- **Input Data:**
+  - Port data is stored in `filtered_ports_with_x_y.csv`
+  - Experiment parameters are defined in the respective experiment files
 
-- **Database Connection and Table Creation:**  
-  The script uses the Google Cloud SQL Connector and SQLAlchemy to connect to a PostgreSQL database. The `create_tables()` function verifies (or creates if needed) four tables:
-  - `experiments` – stores metadata for each experiment run (with parameters and run date).
-  - `abm_ships` – holds per-step information for each Ship agent (such as ID, ship type, scrubber status, route as JSON, position, docking details, etc.).
-  - `abm_ports` – records per-step state for each Port agent (including its ID, name, geographic coordinates, capacity, and current status).
-  - `abm_cells` – logs grid cell activity (only for cells with a Ship or a ScrubberTrail) including their coordinates and occupancy status.
-
-- **Data Collection (Function: collect_simulation_state):**  
-  This function is called every simulation step. It iterates over the model’s agents to gather:
-  - **Ship Data:** For every Ship, the function collects its unique ID, type, scrubber flag, assigned route (as a list of port IDs), grid coordinates, and docking/wait information.
-  - **Port Data:** For every Port, it records the port’s unique ID, name, location (latitude and longitude), capacity details, and whether the port allows scrubber ships.
-  - **Cell Data:** To reduce overhead, cell-level logging (i.e. checking if a cell contains a Ship or a ScrubberTrail) happens **only every 10 steps**. Only cells with activity are recorded.
-
-  Each call to this function returns lists of new data entries for ships, ports, and active grid cells.
-
-- **Experiment Run and Bulk Insert (Function: run_experiment):**  
-  In the `run_experiment` function:
-  - An experiment record is first inserted into the database to generate an `experiment_id` that links all future data.
-  - The Mesa model is then initialized and run for a specified number of steps.
-  - At each step, the data from `collect_simulation_state` is accumulated in memory (i.e. appended to lists for ships, ports, and cells).
-  - After the simulation completes, the accumulated data is converted into Pandas DataFrames and inserted into the database using a **bulk insert**. This minimizes database transactions and improves performance.
-
-- **Performance Considerations:**  
-  By logging only cells with activity and sampling cell data only every 10 steps, the script reduces the amount of data written to the database—helping the overall experiment run faster.
-
-This module provides a robust mechanism for capturing the evolution of ship, port, and cell states over time, enabling later analysis and visualization (for instance, on a Mapbox instance).
+- **Output Data:**
+  - Experiment results are saved in the `data/` directory as parquet files
+  - Visualization plots are generated in the `graphs/` directory

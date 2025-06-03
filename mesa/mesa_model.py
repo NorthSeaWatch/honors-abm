@@ -7,7 +7,7 @@ from mesa.space import MultiGrid
 from mesa.datacollection import DataCollector
 from mesa.visualization.modules import CanvasGrid
 from mesa.visualization.ModularVisualization import ModularServer
-from mesa.visualization.UserParam import UserSettableParameter, Slider, Choice
+from mesa.visualization.UserParam import UserSettableParameter, Slider
 import csv
 from shapely.geometry import Polygon, Point
 # Import Port and Ship from their modules
@@ -32,6 +32,7 @@ class ShipPortModel(Model):
         
         self.next_trail_id = 10000
         
+        self.initial_spawn_done = False
         # Extra environment settings
         self.ship_wait_time = ship_wait_time
         
@@ -158,29 +159,39 @@ class ShipPortModel(Model):
         return 0    
     
     def spawn_ship(self, ship_id):
-        """Spawns a new Ship agent at a water cell along the bottom of the grid"""
-        # create the new ship
+        """Spawns a new Ship agent at a water cell."""
         new_ship = Ship(ship_id, self)
-        # Select a water cell from the bottom row.
-        bottom_y = 0
-        x_range = min(38, self.grid.width)
-        possible_positions = []
-        for x in range(x_range):
-            pos = (x, bottom_y)
-            cell_contents = self.grid.get_cell_list_contents(pos)
-            if any(isinstance(agent, Terrain) and agent.terrain_type == 'water' for agent in cell_contents):
-                possible_positions.append(pos)
-        if possible_positions:
-            start_pos = self.random.choice(possible_positions)
-        else:
-            # fallback: choose any water cell in grid.
+        # Determine spawn location
+        if not self.initial_spawn_done:
+            # Random water cell anywhere on the grid
             water_cells = []
             for x in range(self.grid.width):
                 for y in range(self.grid.height):
                     cell_contents = self.grid.get_cell_list_contents((x, y))
                     if any(isinstance(agent, Terrain) and agent.terrain_type == 'water' for agent in cell_contents):
                         water_cells.append((x, y))
-            start_pos = self.random.choice(water_cells) if water_cells else (0, bottom_y)
+            start_pos = self.random.choice(water_cells) if water_cells else (0, 0)
+        else:
+            # English Channel (bottom row, as before)
+            bottom_y = 0
+            x_range = min(38, self.grid.width)
+            possible_positions = []
+            for x in range(x_range):
+                pos = (x, bottom_y)
+                cell_contents = self.grid.get_cell_list_contents(pos)
+                if any(isinstance(agent, Terrain) and agent.terrain_type == 'water' for agent in cell_contents):
+                    possible_positions.append(pos)
+            if possible_positions:
+                start_pos = self.random.choice(possible_positions)
+            else:
+                # fallback: choose any water cell in grid.
+                water_cells = []
+                for x in range(self.grid.width):
+                    for y in range(self.grid.height):
+                        cell_contents = self.grid.get_cell_list_contents((x, y))
+                        if any(isinstance(agent, Terrain) and agent.terrain_type == 'water' for agent in cell_contents):
+                            water_cells.append((x, y))
+                start_pos = self.random.choice(water_cells) if water_cells else (0, bottom_y)
         self.grid.place_agent(new_ship, start_pos)
         self.schedule.add(new_ship)
         
@@ -251,10 +262,8 @@ class ShipPortModel(Model):
         """
         Step method: gradually spawn ships during initial time steps
         """
-         # Gradually spawn ships over spawn_duration steps.
-        current_step = self.schedule.steps  # scheduler steps so far
+        current_step = self.schedule.steps
         if current_step < self.spawn_duration and self.remaining_ships > 0:
-            # Calculate how many ships to spawn this step.
             spawn_rate = math.ceil(self.remaining_ships / (self.spawn_duration - current_step))
             for _ in range(spawn_rate):
                 if self.remaining_ships <= 0:
@@ -262,7 +271,8 @@ class ShipPortModel(Model):
                 self.spawn_ship(self.next_ship_id)
                 self.next_ship_id += 1
                 self.remaining_ships -= 1
-                
+            if self.remaining_ships <= 0:
+                self.initial_spawn_done = True  # Set flag after initial spawn
         self.schedule.step()
         self.datacollector.collect(self)
 

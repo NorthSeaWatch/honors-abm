@@ -128,7 +128,7 @@ class Ship(Agent):
             # Also trigger exiting if waiting time is up
             if self.wait_time >= self.model.ship_wait_time:
                 self.exiting = True
-                print(f"Ship {self.unique_id} initiating exit due to timeout waiting to dock.")
+                # print(f"Ship {self.unique_id} initiating exit due to timeout waiting to dock.")
                 
             # pick a target cell at the bottom of the english channel to exit form
             if self.exiting and not hasattr(self, "exit_target"):
@@ -158,7 +158,7 @@ class Ship(Agent):
                 self.model.schedule.add(new_trail)
             # when reached the exit cell, remove ship form simulation
             if self.pos == target_pos:
-                print(f"Ship {self.unique_id} has exited the simulation at {self.pos}.")    
+                # print(f"Ship {self.unique_id} has exited the simulation at {self.pos}.")    
                 self.model.grid.remove_agent(self)
                 self.model.schedule.remove(self)
                 # Spawn a replacement ship so the total remains constant.
@@ -182,25 +182,26 @@ class Ship(Agent):
                         self.docked = True
                         self.docking_steps = 0
                         self.wait_time = 0  # reset when docked
-                        print(f'Ship {self.unique_id} docked at {target_port.name}')
+                        # print(f'Ship {self.unique_id} docked at {target_port.name}')
                         # Apply a half penalty if the policy at the docked port is "tax"
                         if target_port.scrubber_policy == "tax" and self.is_scrubber:
                             self.penalty += 0.5
                             self.model.scrubber_penalty_sum += 0.5
                             self.model.scrubber_penalty_count += 0.5
-                            print(f"Ship {self.unique_id} incurred a tax penalty of 0.5 at port {target_port.name}")
+                            # print(f"Ship {self.unique_id} incurred a tax penalty of 0.5 at port {target_port.name}")
                     else:
                         # distinguish between rejection due to capacity vs. scrubber restrictions.
                         if self.is_scrubber and not target_port.allow_scrubber:
                             self.penalty += 1
                             self.model.scrubber_penalty_sum += 1
                             self.model.scrubber_penalty_count += 1
-                            print(f"Ship {self.unique_id} penalized. Port {target_port.name} does not allow scrubbers. Searching for another port.")
+                            # print(f"Ship {self.unique_id} penalized. Port {target_port.name} does not allow scrubbers. Searching for another port.")
                             # Skip this port in favor of an alternate.
                             self.current_target_index += 1
                         else:
                             # Unable to dock due to lack of capacity: wait (do not change position).
-                            print(f"Ship {self.unique_id} waiting at {self.pos} for port {target_port.name} capacity.")
+                            # print(f"Ship {self.unique_id} waiting at {self.pos} for port {target_port.name} capacity.")
+                            pass
             
             else:
                 # default random movement (water cells only) if no valid route is set
@@ -234,9 +235,8 @@ class Ship(Agent):
                 for agent in self.model.schedule.agents:
                     if isinstance(agent, Port) and self in agent.docked_ships:
                         agent.undock_ship(self)
-                        print(f'Ship {self.unique_id} undocked from {agent.name}')
+                        # print(f'Ship {self.unique_id} undocked from {agent.name}')
                         self.docked = False
                         # Advance to the next target port in the route.
                         self.current_target_index += 1
                         break
-                    
